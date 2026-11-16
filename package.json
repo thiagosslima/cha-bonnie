@@ -1,0 +1,35 @@
+{
+  "name": "cha-bonnie",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && node scripts/postbuild.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:db": "node --test tests/db/*.test.mjs",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@fontsource/outfit": "^5.3.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "exceljs": "^4.4.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "pg": "^8.23.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}
