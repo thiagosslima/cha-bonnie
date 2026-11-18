@@ -1,6 +1,8 @@
 export type Attendance = 'yes' | 'maybe' | 'no'
 export type DiaperSize = 'RN' | 'P' | 'M' | 'G' | 'XG'
 export const DIAPER_SIZES: DiaperSize[] = ['RN', 'P', 'M', 'G', 'XG']
+/** Limite de acompanhantes por confirmação (igual ao do banco). */
+export const MAX_COMPANIONS = 20
 
 export interface PublicEvent {
   id: string
@@ -23,12 +25,16 @@ export interface PublicEvent {
   msg_maybe: string
   msg_declined: string
   rsvp_open: boolean
+  /** Pergunta quantas pessoas vão junto. Ausente em versões antigas do banco. */
+  allow_companions?: boolean
 }
 
 export interface MyRsvp {
   guest_name: string
   attendance: Attendance
   diaper_size: DiaperSize | null
+  /** Só os acompanhantes; total da família = 1 + companions_count. */
+  companions_count?: number
   event_slug: string
   created_at: string
   updated_at: string

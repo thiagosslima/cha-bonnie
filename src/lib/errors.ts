@@ -1,6 +1,7 @@
 const MESSAGES: Record<string, string> = {
   NAME_REQUIRED: 'Conta pra gente o seu nome completo 💜',
   NAME_INVALID: 'Esse nome parece incompleto. Pode conferir?',
+  COMPANIONS_INVALID: 'A quantidade de acompanhantes precisa estar entre 0 e 20.',
   ATTENDANCE_REQUIRED: 'Escolha uma das opções de presença.',
   DIAPER_REQUIRED: 'Escolha o tamanho da fralda para confirmar.',
   EVENT_NOT_FOUND: 'Não encontramos esse chá de bebê.',

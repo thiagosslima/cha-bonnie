@@ -106,11 +106,15 @@ function EventForm({ ev, onSaved }: { ev: EventRow; onSaved: () => void }) {
             Botões usam automaticamente o tom {shadeFor(f.theme_primary, 4.6)} (contraste {contrast(shadeFor(f.theme_primary, 4.6), '#ffffff').toFixed(1)}:1 com texto branco).
           </p>
         )}
-        <Field label="Convidados estimados">
+        <Field label="Convidados estimados" hint="Número de pessoas (com acompanhantes), comparado às pessoas confirmadas no painel.">
           <input className={inputCls} inputMode="numeric" {...bind('expected_guests')} />
         </Field>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={f.rsvp_open} onChange={(e) => setF({ ...f, rsvp_open: e.target.checked })} /> Confirmações abertas
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={f.allow_companions} onChange={(e) => setF({ ...f, allow_companions: e.target.checked })} /> Perguntar “Quantas
+          pessoas vão com você?”
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={f.is_active} onChange={(e) => setF({ ...f, is_active: e.target.checked })} /> Evento visível no site

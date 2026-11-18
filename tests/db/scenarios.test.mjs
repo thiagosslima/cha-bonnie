@@ -18,6 +18,7 @@ after(async () => c && (await c.end()))
 const diaperRec = async (slug) => (await anon(c, 'select public.get_diaper_recommendation($1) r', [slug])).rows[0].r
 const suggestions = async () => (await admin(c, 'select public.admin_gift_suggestions() r')).rows[0].r
 const publicSuggestions = async () => (await anon(c, 'select public.get_gift_suggestions() r')).rows[0].r
+const comboOf = (list) => list.map((s) => s.name).sort().join('|')
 const item = async (name) => (await admin(c, 'select * from public.layette_item_totals where name = $1 order by sort_order limit 1', [name])).rows[0]
 const move = (id, type, qty, extra = {}) =>
   admin(c, 'select public.admin_record_movement($1,$2,$3,$4,$5,$6,$7) r', [id, type, qty, extra.bucket ?? null, extra.notes ?? null, extra.amount ?? null, extra.req ?? null])
@@ -129,6 +130,97 @@ describe('Convite e confirmação', () => {
     let code = null
     for (let i = 0; i < 35 && !code; i++) code = await errorCode(submit(c, 'guarulhos', `Robô ${i}`, 'no', null, { ip: '192.0.2.99' }))
     assert.equal(code, 'RATE_LIMITED')
+  })
+})
+
+describe('Acompanhantes e fralda por família', () => {
+  const ip = (n) => ({ ip: `198.51.100.${200 + n}` })
+  const stats = async (slug) => (await admin(c, 'select public.admin_diaper_stats() r')).rows[0].r.find((e) => e.slug === slug).sizes
+  const chosen = (sizes, size) => sizes.find((x) => x.diaper_size === size).chosen
+  const totalChosen = (sizes) => sizes.reduce((s, x) => s + x.chosen, 0)
+  const update = (token, attendance, diaper, companions = null) =>
+    anon(c, 'select public.update_my_rsvp($1,$2,$3,$4,$5) r', [token, null, attendance, diaper, companions]).then((r) => r.rows[0].r)
+
+  test('registros existentes ficam com 0 acompanhantes; party_size foi substituído', async () => {
+    const cols = (await c.query(`select column_name from information_schema.columns where table_schema='public' and table_name='rsvps'`)).rows.map((r) => r.column_name)
+    assert.ok(cols.includes('companions_count'))
+    assert.ok(!cols.includes('party_size'))
+    const n = (await admin(c, 'select count(*)::int n from public.rsvps where companions_count <> 0')).rows[0].n
+    assert.equal(n, 0, 'confirmações anteriores (sem o campo) contam 0 acompanhantes')
+    const ev = (await anon(c, `select public.get_public_event('guarulhos') r`)).rows[0].r
+    assert.equal(ev.allow_companions, true)
+  })
+
+  test('1, 2 e 3. sem acompanhantes, com um e com vários: uma fralda por família', async () => {
+    const before = await stats('guarulhos')
+    const solo = await submit(c, 'guarulhos', 'Helena Sozinha', 'yes', 'M', ip(1)) // chamada antiga, sem o parâmetro
+    const dupla = await submit(c, 'guarulhos', 'Igor Com Um', 'yes', 'M', { ...ip(2), companions: 1 })
+    const familia = await submit(c, 'guarulhos', 'Joana Família', 'yes', 'M', { ...ip(3), companions: 3 })
+    assert.deepEqual([solo, dupla, familia].map((x) => x.rsvp.companions_count), [0, 1, 3])
+    const after = await stats('guarulhos')
+    assert.equal(chosen(after, 'M'), chosen(before, 'M') + 3, '3 famílias = 3 fraldas, não 7')
+    assert.equal(totalChosen(after), totalChosen(before) + 3)
+    const t = (
+      await admin(
+        c,
+        `select count(*)::int families, sum(1 + companions_count)::int people, sum(companions_count)::int companions
+           from public.rsvps where guest_name in ('Helena Sozinha', 'Igor Com Um', 'Joana Família')`,
+      )
+    ).rows[0]
+    assert.deepEqual(t, { families: 3, people: 7, companions: 4 })
+  })
+
+  test('4. alterar acompanhantes não muda a distribuição nem a recomendação', async () => {
+    const { token } = await submit(c, 'guarulhos', 'Karla Muda', 'yes', 'G', { ...ip(4), companions: 1 })
+    const before = await stats('guarulhos')
+    const recBefore = await diaperRec('guarulhos')
+    const r = await update(token, 'yes', 'G', 5)
+    assert.equal(r.companions_count, 5)
+    assert.deepEqual(await stats('guarulhos'), before)
+    assert.deepEqual(await diaperRec('guarulhos'), recBefore)
+    // sem informar acompanhantes (versão antiga do site), o valor é mantido
+    assert.equal((await update(token, 'yes', 'G')).companions_count, 5)
+    assert.equal((await anon(c, 'select public.get_my_rsvp($1) r', [token])).rows[0].r.companions_count, 5)
+    assert.equal(await errorCode(update(token, 'yes', 'G', -1)), 'COMPANIONS_INVALID')
+    assert.equal(await errorCode(update(token, 'yes', 'G', 21)), 'COMPANIONS_INVALID')
+    assert.equal(await errorCode(submit(c, 'guarulhos', 'Muitos Demais', 'yes', 'G', { ...ip(5), companions: 50 })), 'COMPANIONS_INVALID')
+    // o painel também respeita o limite
+    assert.match(await errorCode(admin(c, `update public.rsvps set companions_count = 99 where guest_name = 'Karla Muda'`)), /companions_count_check/)
+  })
+
+  test('5. confirmado → ausente: a fralda deixa de contar', async () => {
+    const { token } = await submit(c, 'guarulhos', 'Lucas Desiste', 'yes', 'XG', { ...ip(6), companions: 2 })
+    const mid = await stats('guarulhos')
+    const r = await update(token, 'no', 'XG')
+    assert.equal(r.diaper_size, null)
+    const end = await stats('guarulhos')
+    assert.equal(chosen(end, 'XG'), chosen(mid, 'XG') - 1)
+    assert.equal(totalChosen(end), totalChosen(mid) - 1)
+    const maybe = await update(token, 'maybe', 'XG')
+    assert.equal(maybe.diaper_size, null)
+    assert.equal(totalChosen(await stats('guarulhos')), totalChosen(mid) - 1)
+  })
+
+  test('6. indeciso → confirmado: exige fralda e passa a contar uma vez', async () => {
+    const { token, rsvp } = await submit(c, 'guarulhos', 'Marina Indecisa', 'maybe', null, { ...ip(7), companions: 2 })
+    assert.equal(rsvp.diaper_size, null)
+    const before = await stats('guarulhos')
+    assert.equal(await errorCode(update(token, 'yes', null)), 'DIAPER_REQUIRED')
+    const r = await update(token, 'yes', 'P')
+    assert.deepEqual([r.attendance, r.diaper_size, r.companions_count], ['yes', 'P', 2])
+    assert.equal(chosen(await stats('guarulhos'), 'P'), chosen(before, 'P') + 1)
+    // repetir a mesma alteração não duplica a escolha
+    await update(token, 'yes', 'P')
+    assert.equal(chosen(await stats('guarulhos'), 'P'), chosen(before, 'P') + 1)
+  })
+
+  test('evento com a pergunta desligada ignora acompanhantes', async () => {
+    await admin(c, `update public.events set allow_companions = false where slug = 'indaiatuba'`)
+    const { token, rsvp } = await submit(c, 'indaiatuba', 'Nina Sem Pergunta', 'yes', 'M', { ...ip(8), companions: 4 })
+    assert.equal(rsvp.companions_count, 0)
+    assert.equal((await update(token, 'yes', 'M', 3)).companions_count, 0)
+    await admin(c, `update public.events set allow_companions = true where slug = 'indaiatuba'`)
+    assert.equal((await update(token, 'yes', 'M', 3)).companions_count, 3)
   })
 })
 
@@ -278,6 +370,57 @@ describe('Enxoval e sugestões', () => {
     const s3 = await suggestions()
     assert.notEqual(s3[1].item_id, outroId)
     assert.equal(s3[1].pinned, false)
+  })
+
+  test('10, 11 e 12. sorteio: varia, equilibra faixas e nunca traz itens completos ou descartados', async () => {
+    await admin(c, 'select public.admin_set_gift_pin(2::smallint, null)')
+    // dá preço a alguns itens pendentes para haver alternativas em cada faixa
+    const priced = async (price, offset) =>
+      admin(
+        c,
+        `update public.layette_items set estimated_unit_price = $1 where id in (
+           select id from public.layette_item_totals
+            where is_gift_eligible and not is_discarded and pending_quantity > 0 and estimated_unit_price is null
+            order by sort_order limit 4 offset $2)`,
+        [price, offset],
+      )
+    await priced(20, 0)
+    await priced(70, 0)
+    await priced(180, 0)
+
+    const draw = async () => (await admin(c, 'select public.admin_gift_suggestions(true) r')).rows[0].r
+    const combos = new Set()
+    const descartado = (await draw()).find((s) => s.price_tier === 'barato')
+    await admin(c, 'select public.admin_set_discarded($1, true, null)', [descartado.item_id])
+    for (let i = 0; i < 25; i++) {
+      const s = await draw()
+      assert.equal(s.length, 3)
+      assert.deepEqual(s.map((x) => x.price_tier), ['barato', 'medio', 'caro'], 'uma barata, uma média e uma cara')
+      assert.equal(new Set(s.map((x) => x.item_id)).size, 3, 'sem repetir produto na mesma seleção')
+      assert.ok(!s.some((x) => x.item_id === descartado.item_id), 'descartado nunca aparece')
+      const rows = (await admin(c, 'select status, pending_quantity::float p from public.layette_item_totals where id = any($1::uuid[])', [s.map((x) => x.item_id)])).rows
+      assert.ok(rows.every((r) => r.status !== 'completo' && r.status !== 'descartado' && r.p > 0), 'só itens com quantidade pendente')
+      combos.add(s.map((x) => x.item_id).sort().join())
+    }
+    assert.ok(combos.size > 1, `o sorteio varia (${combos.size} combinações)`)
+    await admin(c, 'select public.admin_set_discarded($1, false, null)', [descartado.item_id])
+
+    // convidado: a cada chamada um novo sorteio, sem expor dados internos e sem gravar nada
+    const movesBefore = (await admin(c, 'select count(*)::int n from public.layette_movements')).rows[0].n
+    const pub = new Set()
+    for (let i = 0; i < 15; i++) pub.add(comboOf(await publicSuggestions()))
+    assert.ok(pub.size > 1)
+    assert.deepEqual(Object.keys((await publicSuggestions())[0]).sort(), ['description', 'image_url', 'name', 'price_tier'])
+    assert.equal((await admin(c, 'select count(*)::int n from public.layette_movements')).rows[0].n, movesBefore, 'exibir não registra nada')
+
+    // fixação continua valendo durante o sorteio
+    const fixo = (await draw())[0]
+    await admin(c, 'select public.admin_set_gift_pin(1::smallint, $1)', [fixo.item_id])
+    for (let i = 0; i < 5; i++) assert.equal((await draw())[0].item_id, fixo.item_id)
+    await admin(c, 'select public.admin_set_gift_pin(1::smallint, null)')
+
+    // sem sorteio (padrão do painel antigo): continua determinístico
+    assert.deepEqual(await suggestions(), await suggestions())
   })
 
   test('15. faixa sem itens elegíveis usa outra faixa; menos itens que posições', async () => {

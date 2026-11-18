@@ -54,7 +54,10 @@ export const uuid = () => randomUUID()
 export async function submit(c, slug, name, attendance, diaper, opts = {}) {
   const token = opts.token ?? newToken()
   const req = opts.req ?? uuid()
-  const r = await anon(c, 'select public.submit_rsvp($1,$2,$3,$4,$5,$6) as r', [slug, name, attendance, diaper, token, req], opts)
+  const r =
+    opts.companions === undefined
+      ? await anon(c, 'select public.submit_rsvp($1,$2,$3,$4,$5,$6) as r', [slug, name, attendance, diaper, token, req], opts)
+      : await anon(c, 'select public.submit_rsvp($1,$2,$3,$4,$5,$6,$7) as r', [slug, name, attendance, diaper, token, req, opts.companions], opts)
   return { token, req, rsvp: r.rows[0].r }
 }
 

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { brl, dateTime } from '../../lib/format'
+import { partySize, peopleLabel, rsvpTotals } from '../../lib/rsvpStats'
 import { ATTENDANCE_LABEL, Badge, ErrorBox, Loading, Panel, Stat, TargetBars, fetchEvents, fetchItems, fetchRsvps, layetteSummary, rpc, useLoad } from './common'
 
 interface DiaperStat {
@@ -19,23 +20,28 @@ export default function Dashboard() {
   if (error) return <ErrorBox>{error}</ErrorBox>
   if (!data) return null
   const { events, rsvps, items, diapers } = data
-  const by = (a: string) => rsvps.filter((r) => r.attendance === a).length
+  const tot = rsvpTotals(rsvps)
   const lay = layetteSummary(items)
   const eventName = (id: string) => events.find((e) => e.id === id)?.city ?? '—'
 
   return (
     <div className="grid gap-5">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Respostas" value={rsvps.length} />
-        <Stat label="Confirmados" value={by('yes')} />
-        <Stat label="Ainda não sabem" value={by('maybe')} />
-        <Stat label="Não poderão ir" value={by('no')} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Famílias confirmadas" value={tot.families} hint={`${tot.responses} respostas no total`} />
+        <Stat label="Pessoas confirmadas" value={tot.people} hint="responsáveis + acompanhantes" />
+        <Stat label="Acompanhantes" value={tot.companions} hint="das famílias confirmadas" />
+        <Stat label="Famílias indecisas" value={tot.maybeFamilies} hint={tot.maybeFamilies ? `até ${peopleLabel(tot.maybePeople)}` : undefined} />
+        <Stat label="Famílias ausentes" value={tot.declinedFamilies} />
+        <Stat label="Escolhas de fralda" value={tot.diaperChoices} hint="1 por família confirmada" />
       </div>
+
+      <p className="-mt-2 text-xs text-ink/65">
+        Cada resposta representa uma família. A fralda é uma escolha por família confirmada; os acompanhantes não mudam a distribuição de tamanhos.
+      </p>
 
       <div className="grid gap-5 lg:grid-cols-2">
         {events.map((ev) => {
-          const r = rsvps.filter((x) => x.event_id === ev.id)
-          const yes = r.filter((x) => x.attendance === 'yes').length
+          const t = rsvpTotals(rsvps.filter((x) => x.event_id === ev.id))
           const d = diapers.find((x) => x.event_id === ev.id)
           return (
             <Panel
@@ -48,10 +54,13 @@ export default function Dashboard() {
               }
               actions={<Badge tone={ev.rsvp_open ? 'good' : 'muted'}>{ev.rsvp_open ? 'Confirmações abertas' : 'Confirmações encerradas'}</Badge>}
             >
-              <p className="mb-4 text-sm">
-                <strong className="font-medium">{yes}</strong> confirmados
-                {ev.expected_guests ? ` de ~${ev.expected_guests} convidados estimados` : ''} · {r.filter((x) => x.attendance === 'maybe').length} indecisos ·{' '}
-                {r.filter((x) => x.attendance === 'no').length} ausentes
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                <Stat label="Famílias" value={t.families} hint="confirmadas" />
+                <Stat label="Pessoas" value={t.people} hint={ev.expected_guests ? `de ~${ev.expected_guests} estimadas` : `${t.companions} acompanhantes`} />
+                <Stat label="Fraldas" value={t.diaperChoices} hint="1 por família" />
+              </div>
+              <p className="mb-4 text-sm text-ink/80">
+                {t.companions} acompanhantes · {t.maybeFamilies} famílias indecisas · {t.declinedFamilies} ausentes
               </p>
               {d && (
                 <TargetBars
@@ -72,9 +81,13 @@ export default function Dashboard() {
             <ul className="divide-y divide-ink/10">
               {rsvps.slice(0, 8).map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-                  <span className="font-normal">{r.guest_name}</span>
+                  <span className="font-normal">
+                    {r.guest_name}
+                    {r.companions_count > 0 && <span className="text-ink/60"> +{r.companions_count}</span>}
+                  </span>
                   <span className="flex items-center gap-2 text-ink/70">
                     <Badge tone={r.attendance === 'yes' ? 'good' : r.attendance === 'maybe' ? 'warn' : 'muted'}>{ATTENDANCE_LABEL[r.attendance]}</Badge>
+                    {r.attendance === 'yes' && <Badge>{peopleLabel(partySize(r))}</Badge>}
                     {r.diaper_size && <Badge tone="primary">{r.diaper_size}</Badge>}
                     {eventName(r.event_id)} · {dateTime(r.updated_at)}
                   </span>

@@ -3,9 +3,10 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { friendlyError, errorCode } from '../../lib/errors'
 import { draftStore, newEditToken, newRequestId, tokenStore } from '../../lib/storage'
-import { DIAPER_SIZES, type Attendance, type DiaperRecommendation, type DiaperSize, type MyRsvp, type PublicEvent } from '../../lib/types'
-import { BackButton, Button, Card, DateBlock, InviteTitle, Notice, Page, Spinner, Steps, useEventTheme } from '../../components/ui'
-import { CalendarLink, EventSummary, GiftSuggestions, MapsLink, VenueBlock } from './parts'
+import { DIAPER_SIZES, MAX_COMPANIONS, type Attendance, type DiaperRecommendation, type DiaperSize, type MyRsvp, type PublicEvent } from '../../lib/types'
+import { BackButton, Button, Card, DateBlock, InviteTitle, Notice, NumberStepper, Page, Spinner, Steps, useEventTheme } from '../../components/ui'
+import { peopleLabel } from '../../lib/rsvpStats'
+import { CalendarLink, ConfirmationSummary, EventSummary, GiftSuggestions, MapsLink, VenueBlock } from './parts'
 
 type Step = 'invite' | 'name' | 'attendance' | 'diaper' | 'done'
 interface Draft {
@@ -13,11 +14,21 @@ interface Draft {
   name: string
   attendance: Attendance | null
   diaper: DiaperSize | null
+  /** Acompanhantes (sem contar quem responde). 0 = vai sozinho. */
+  companions: number
   token: string
   requestId: string
 }
 
-const freshDraft = (): Draft => ({ step: 'invite', name: '', attendance: null, diaper: null, token: newEditToken(), requestId: newRequestId() })
+const freshDraft = (): Draft => ({
+  step: 'invite',
+  name: '',
+  attendance: null,
+  diaper: null,
+  companions: 0,
+  token: newEditToken(),
+  requestId: newRequestId(),
+})
 
 export default function InvitePage() {
   const { slug = '' } = useParams()
@@ -27,7 +38,7 @@ export default function InvitePage() {
 
   const [ev, setEv] = useState<PublicEvent | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [draft, setDraftState] = useState<Draft>(() => draftStore.get<Draft>(slug) ?? freshDraft())
+  const [draft, setDraftState] = useState<Draft>(() => ({ ...freshDraft(), ...draftStore.get<Partial<Draft>>(slug) }))
   const [saved, setSaved] = useState<MyRsvp | null>(null)
   const [editToken, setEditToken] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
@@ -112,7 +123,13 @@ export default function InvitePage() {
     if (draft.attendance === 'yes' && !draft.diaper) return setError('Escolha o tamanho da fralda para confirmar 💜')
     setSubmitting(true)
     setError(null)
-    const payload = { name: draft.name, attendance: draft.attendance, diaper: draft.attendance === 'yes' ? draft.diaper : null }
+    const withCompanions = Boolean(ev?.allow_companions)
+    const payload = {
+      name: draft.name,
+      attendance: draft.attendance,
+      diaper: draft.attendance === 'yes' ? draft.diaper : null,
+      companions: withCompanions ? Math.min(MAX_COMPANIONS, Math.max(0, draft.companions || 0)) : 0,
+    }
     try {
       let result: MyRsvp
       if (editing && editToken) {
@@ -120,7 +137,12 @@ export default function InvitePage() {
       } else {
         result = await api.submitRsvp({ slug, token: draft.token, requestId: draft.requestId, ...payload })
         // Se uma tentativa anterior chegou ao servidor com outros dados, atualiza.
-        if (result.attendance !== payload.attendance || result.diaper_size !== payload.diaper || result.guest_name !== payload.name.trim().replace(/\s+/g, ' ')) {
+        if (
+          result.attendance !== payload.attendance ||
+          result.diaper_size !== payload.diaper ||
+          result.guest_name !== payload.name.trim().replace(/\s+/g, ' ') ||
+          (withCompanions && (result.companions_count ?? 0) !== payload.companions)
+        ) {
           result = await api.updateRsvp({ token: draft.token, ...payload })
         }
         tokenStore.set(slug, draft.token)
@@ -140,7 +162,7 @@ export default function InvitePage() {
   function startEdit() {
     if (!saved) return
     setEditing(true)
-    setDraft({ step: 'name', name: saved.guest_name, attendance: saved.attendance, diaper: saved.diaper_size })
+    setDraft({ step: 'name', name: saved.guest_name, attendance: saved.attendance, diaper: saved.diaper_size, companions: saved.companions_count ?? 0 })
   }
 
   if (loadError) {
@@ -218,6 +240,9 @@ export default function InvitePage() {
             headingRef={headingRef}
             value={draft.name}
             onChange={(name) => setDraft({ name })}
+            allowCompanions={Boolean(ev.allow_companions)}
+            companions={draft.companions}
+            onCompanionsChange={(companions) => setDraft({ companions })}
             onNext={() => go('attendance')}
             city={ev.city}
           />
@@ -268,7 +293,16 @@ function StepHeading({ headingRef, children, sub }: { headingRef: React.RefObjec
   )
 }
 
-function NameStep(p: { headingRef: React.RefObject<HTMLDivElement | null>; value: string; onChange: (v: string) => void; onNext: () => void; city: string }) {
+function NameStep(p: {
+  headingRef: React.RefObject<HTMLDivElement | null>
+  value: string
+  onChange: (v: string) => void
+  allowCompanions: boolean
+  companions: number
+  onCompanionsChange: (v: number) => void
+  onNext: () => void
+  city: string
+}) {
   const id = useId()
   const [touched, setTouched] = useState(false)
   const clean = p.value.trim().replace(/\s+/g, ' ')
@@ -308,6 +342,27 @@ function NameStep(p: { headingRef: React.RefObject<HTMLDivElement | null>; value
           </p>
         )}
       </div>
+      {p.allowCompanions && (
+        <div className="mt-7 rounded-3xl bg-primary-50/70 px-4 py-5 text-center">
+          <p id={`${id}-comp`} className="text-[1.05rem] font-normal text-ink">
+            Quantas pessoas vão com você?
+          </p>
+          <div className="mt-3 flex justify-center">
+            <NumberStepper
+              value={p.companions}
+              onChange={p.onCompanionsChange}
+              min={0}
+              max={MAX_COMPANIONS}
+              label="Acompanhantes"
+              labelId={`${id}-comp`}
+              describedBy={`${id}-comp-hint`}
+            />
+          </div>
+          <p id={`${id}-comp-hint`} className="mt-3 text-sm text-ink/75" aria-live="polite">
+            {p.companions === 0 ? 'Zero se você for sozinho(a).' : `${peopleLabel(1 + p.companions)} no total, contando com você.`}
+          </p>
+        </div>
+      )}
       <Button type="submit" className="mt-7 w-full">
         Continuar
       </Button>
@@ -458,13 +513,26 @@ function DoneStep({ headingRef, ev, saved, token, onEdit }: { headingRef: React.
       window.prompt('Copie o seu link:', editUrl)
     }
   }
+  const confirmed = saved.attendance === 'yes'
   return (
     <div className="anim-rise text-center">
       <div className="mx-auto w-44">
         <InviteTitle as="h2" />
       </div>
       <div ref={headingRef} tabIndex={-1} className="mt-5 outline-none" aria-live="polite">
-        <h1 className="text-[1.75rem] font-normal text-primary-strong">{title}</h1>
+        {confirmed ? (
+          <>
+            <div className="flex items-center justify-center gap-2 sm:gap-3">
+              <img src="/img/flores/f03.png" alt="" aria-hidden="true" className="h-8 w-8 shrink-0 object-contain sm:h-10 sm:w-10" />
+              <h1 className="anim-pop text-[clamp(1.75rem,7.5vw,2.4rem)] font-medium leading-tight text-primary-strong">Presença confirmada! 💕</h1>
+              <img src="/img/flores/f03.png" alt="" aria-hidden="true" className="h-8 w-8 shrink-0 -scale-x-100 object-contain sm:h-10 sm:w-10" />
+            </div>
+            <div className="mx-auto mt-3 h-px w-24 bg-primary-200" aria-hidden="true" />
+            <h2 className="mt-4 text-[1.3rem] font-normal text-primary-text">{title}</h2>
+          </>
+        ) : (
+          <h1 className="text-[1.75rem] font-normal text-primary-strong">{title}</h1>
+        )}
         {rest.map((para, i) => (
           <p key={i} className="mx-auto mt-3 max-w-md text-[1.05rem] leading-relaxed">
             {para}
@@ -472,21 +540,16 @@ function DoneStep({ headingRef, ev, saved, token, onEdit }: { headingRef: React.
         ))}
       </div>
 
-      {saved.attendance !== 'no' && (
+      {confirmed ? (
         <div className="mt-6">
-          <EventSummary ev={ev} />
+          <ConfirmationSummary ev={ev} saved={saved} />
         </div>
-      )}
-
-      {saved.attendance === 'yes' && saved.diaper_size && (
-        <div className="mt-4 flex items-center justify-center gap-3 rounded-2xl border border-primary-200 px-4 py-3">
-          <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary-strong text-lg font-medium text-white">{saved.diaper_size}</span>
-          <span className="text-left text-[0.98rem]">
-            Sua fraldinha: <strong className="font-medium">tamanho {saved.diaper_size}</strong>
-            <br />
-            <span className="text-sm text-ink/70">A marca é você quem escolhe.</span>
-          </span>
-        </div>
+      ) : (
+        saved.attendance === 'maybe' && (
+          <div className="mt-6">
+            <EventSummary ev={ev} />
+          </div>
+        )
       )}
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-2">

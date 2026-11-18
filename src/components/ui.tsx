@@ -96,6 +96,49 @@ export function BackButton({ onClick, label = 'Voltar' }: { onClick: () => void;
   )
 }
 
+/**
+ * Seletor numérico com botões − e +, nas cores do tema da cidade.
+ * Acessível: grupo rotulado, botões com nome e valor anunciado ao mudar.
+ */
+export function NumberStepper({
+  value,
+  onChange,
+  min = 0,
+  max = 99,
+  label,
+  labelId,
+  describedBy,
+}: {
+  value: number
+  onChange: (v: number) => void
+  min?: number
+  max?: number
+  label: string
+  labelId?: string
+  describedBy?: string
+}) {
+  const set = (v: number) => onChange(Math.min(max, Math.max(min, v)))
+  const btn =
+    'grid h-12 w-12 shrink-0 place-items-center rounded-full border-2 border-primary-200 bg-white text-primary-strong transition hover:border-primary hover:bg-primary-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-primary-200 disabled:hover:bg-white'
+  return (
+    <div role="group" aria-labelledby={labelId} aria-label={labelId ? undefined : label} aria-describedby={describedBy} className="inline-flex items-center gap-4">
+      <button type="button" className={btn} onClick={() => set(value - 1)} disabled={value <= min} aria-label={`Diminuir ${label.toLowerCase()}`}>
+        <svg viewBox="0 0 20 20" className="h-5 w-5" aria-hidden="true">
+          <path d="M5 10h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
+      <output aria-live="polite" className="min-w-[2.5ch] text-center text-[2rem] font-medium tabular-nums leading-none text-primary-strong" key={value}>
+        <span className="anim-pop inline-block">{value}</span>
+      </output>
+      <button type="button" className={btn} onClick={() => set(value + 1)} disabled={value >= max} aria-label={`Aumentar ${label.toLowerCase()}`}>
+        <svg viewBox="0 0 20 20" className="h-5 w-5" aria-hidden="true">
+          <path d="M5 10h10M10 5v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
 export function Steps({ current, total }: { current: number; total: number }) {
   return (
     <div className="flex items-center justify-center gap-1.5" role="progressbar" aria-valuemin={1} aria-valuemax={total} aria-valuenow={current} aria-label={`Etapa ${current} de ${total}`}>
