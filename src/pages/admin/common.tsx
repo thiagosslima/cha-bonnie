@@ -43,6 +43,8 @@ export interface RsvpRow {
   guest_name_normalized: string
   attendance: 'yes' | 'maybe' | 'no'
   diaper_size: 'RN' | 'P' | 'M' | 'G' | 'XG' | null
+  /** Acompanhantes (sem contar o responsável). */
+  companions_count: number
   created_at: string
   updated_at: string
 }
@@ -69,11 +71,12 @@ export interface EventRow {
   msg_declined: string
   rsvp_open: boolean
   is_active: boolean
+  allow_companions: boolean
   expected_guests: number | null
   sort_order: number
 }
 
-export const RSVP_COLS = 'id,event_id,guest_name,guest_name_normalized,attendance,diaper_size,created_at,updated_at'
+export const RSVP_COLS = 'id,event_id,guest_name,guest_name_normalized,attendance,diaper_size,companions_count,created_at,updated_at'
 
 export const STATUS_LABEL: Record<ItemRow['status'], string> = {
   nao_adquirido: 'Não adquirido',
@@ -139,7 +142,7 @@ export async function fetchEvents(): Promise<EventRow[]> {
 export async function fetchRsvps(): Promise<RsvpRow[]> {
   const { data, error } = await supabase.from('rsvps').select(RSVP_COLS).order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
-  return (data ?? []) as RsvpRow[]
+  return (data ?? []).map((r) => ({ ...r, companions_count: Number(r.companions_count ?? 0) })) as RsvpRow[]
 }
 
 export function layetteSummary(items: ItemRow[]) {

@@ -34,7 +34,7 @@ const GUEST_TIER = { barato: 'Mimo simples', medio: 'Mimo médio', caro: 'Mimo e
 export default function Suggestions() {
   const { data, error, loading, reload } = useLoad(async () => {
     const [sugs, items, settings] = await Promise.all([
-      rpc<Suggestion[]>('admin_gift_suggestions'),
+      rpc<Suggestion[]>('admin_gift_suggestions', { p_random: true }),
       fetchItems(),
       supabase.from('gift_recommendation_settings').select('*').eq('id', 1).single(),
     ])
@@ -50,6 +50,7 @@ export default function Suggestions() {
   if (!data) return null
   const { sugs, items, settings } = data
   const candidates = items.filter((i) => i.is_gift_eligible && !i.is_discarded && (i.pending_quantity ?? 0) > 0)
+  const pool = (t: ItemRow['price_tier']) => candidates.filter((i) => i.price_tier === t).length
 
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     setErr(null)
@@ -70,10 +71,21 @@ export default function Suggestions() {
 
   return (
     <div className="grid gap-5">
-      <Panel title="Sugestões atuais do convite">
+      <Panel
+        title="Sugestões do convite (exemplo de sorteio)"
+        actions={
+          <Button variant="outline" className="min-h-10 text-sm" loading={loading} onClick={reload}>
+            Sortear de novo
+          </Button>
+        }
+      >
+        <p className="mb-2 text-sm text-ink/75">
+          A cada visita, o convite sorteia uma sugestão barata, uma média e uma cara entre os itens elegíveis (prioridade alta tem mais chance).
+          Posições fixadas não entram no sorteio. Itens completos, descartados ou fora das sugestões saem automaticamente. Nada é reservado por
+          aparecer aqui.
+        </p>
         <p className="mb-4 text-sm text-ink/75">
-          Atualizam sozinhas conforme o enxoval muda: itens completos, descartados ou fora das sugestões saem automaticamente. {candidates.length} itens
-          elegíveis no momento.
+          {candidates.length} itens elegíveis: {pool('barato')} baratos · {pool('medio')} médios · {pool('caro')} caros · {pool(null)} sem preço.
         </p>
         {err && (
           <div className="mb-3">

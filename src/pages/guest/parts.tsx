@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import { icsFor, longDate, mapsUrl, timeLabel } from '../../lib/format'
-import type { GiftSuggestion, PublicEvent } from '../../lib/types'
+import { comboKey, drawAvoidingPrevious } from '../../lib/giftDraw'
+import { companionsLabel, partySize, peopleLabel } from '../../lib/rsvpStats'
+import type { GiftSuggestion, MyRsvp, PublicEvent } from '../../lib/types'
 
 export function VenueBlock({ ev }: { ev: PublicEvent }) {
   return (
@@ -72,6 +74,67 @@ export function EventSummary({ ev }: { ev: PublicEvent }) {
   )
 }
 
+/** Resumo exibido depois de uma confirmação positiva. */
+export function ConfirmationSummary({ ev, saved }: { ev: PublicEvent; saved: MyRsvp }) {
+  const total = partySize(saved)
+  const row = 'flex gap-3'
+  const dt = 'w-[6.5rem] shrink-0 font-normal text-ink/70'
+  return (
+    <section aria-label="Resumo da sua confirmação" className="rounded-2xl border border-primary-200 bg-primary-50/60 px-4 py-4 text-left text-[0.95rem]">
+      <dl className="grid gap-2.5">
+        <div className={row}>
+          <dt className={dt}>Responsável</dt>
+          <dd className="min-w-0 font-medium [overflow-wrap:anywhere]">{saved.guest_name}</dd>
+        </div>
+        <div className={row}>
+          <dt className={dt}>Cidade</dt>
+          <dd className="font-normal">
+            {ev.city}
+            {ev.state ? ` - ${ev.state}` : ''}
+          </dd>
+        </div>
+        <div className={row}>
+          <dt className={dt}>Quando</dt>
+          <dd className="font-normal">
+            {longDate(ev.event_date)}, às {timeLabel(ev.event_time)}
+          </dd>
+        </div>
+        <div className={row}>
+          <dt className={dt}>Onde</dt>
+          <dd className="font-normal">
+            {ev.venue}
+            {ev.venue_detail ? ` - ${ev.venue_detail}` : ''}
+            <br />
+            <span className="font-light">
+              {ev.address_line1}
+              {ev.address_line2 ? `, ${ev.address_line2}` : ''}
+            </span>
+          </dd>
+        </div>
+        <div className={row}>
+          <dt className={dt}>Participantes</dt>
+          <dd className="font-normal">
+            <strong className="font-medium">{peopleLabel(total)}</strong>
+            <span className="text-ink/70"> ({companionsLabel(total - 1)})</span>
+          </dd>
+        </div>
+        {saved.diaper_size && (
+          <div className={`${row} items-center`}>
+            <dt className={dt}>Fralda</dt>
+            <dd className="flex items-center gap-2.5 font-normal">
+              <span className="grid h-9 min-w-9 place-items-center rounded-lg bg-primary-strong px-1.5 font-medium text-white">{saved.diaper_size}</span>
+              <span>
+                Tamanho {saved.diaper_size}
+                <span className="block text-xs text-ink/70">Uma fraldinha por família. A marca é você quem escolhe.</span>
+              </span>
+            </dd>
+          </div>
+        )}
+      </dl>
+    </section>
+  )
+}
+
 export function CalendarLink({ ev }: { ev: PublicEvent }) {
   const [href, setHref] = useState<string>()
   useEffect(() => {
@@ -98,12 +161,37 @@ export function CalendarLink({ ev }: { ev: PublicEvent }) {
 const FLOWERS = ['f00', 'f03', 'f02', 'f07', 'f09', 'f14']
 const TIER_LABEL: Record<string, string> = { barato: 'Mimo simples', medio: 'Mimo médio', caro: 'Mimo especial' }
 
+// Um sorteio por carregamento da página: as sugestões ficam estáveis enquanto
+// o convidado navega (alterar resposta, voltar) e mudam ao atualizar a página.
+const LAST_GIFTS_KEY = 'bonnie:last-gifts'
+let giftDraw: Promise<GiftSuggestion[]> | null = null
+
+function loadGiftSuggestions(): Promise<GiftSuggestion[]> {
+  if (!giftDraw) {
+    let previous: string | null = null
+    try {
+      previous = localStorage.getItem(LAST_GIFTS_KEY)
+    } catch {
+      /* armazenamento indisponível: só não evita repetição */
+    }
+    giftDraw = drawAvoidingPrevious(api.giftSuggestions, previous).then((g) => {
+      try {
+        if (g.length) localStorage.setItem(LAST_GIFTS_KEY, comboKey(g))
+      } catch {
+        /* idem */
+      }
+      return g
+    })
+    giftDraw.catch(() => (giftDraw = null))
+  }
+  return giftDraw
+}
+
 export function GiftSuggestions() {
   const [items, setItems] = useState<GiftSuggestion[] | null>(null)
   useEffect(() => {
     let alive = true
-    api
-      .giftSuggestions()
+    loadGiftSuggestions()
       .then((g) => alive && setItems(g))
       .catch(() => alive && setItems([]))
     return () => {

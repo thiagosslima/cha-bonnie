@@ -19,6 +19,7 @@ Stack: React 19, TypeScript, Vite, Tailwind 4 e Supabase (PostgreSQL, Auth e RLS
    1. `supabase/migrations/20261116000100_schema.sql`
    2. `supabase/migrations/20261116000200_functions.sql`
    3. `supabase/migrations/20261116000300_seed.sql` (eventos, metas de fralda e configurações iniciais)
+   4. `supabase/migrations/20261118000100_companions_and_random_gifts.sql` (acompanhantes e sorteio das sugestões)
 
    Se preferir a CLI: `supabase link --project-ref SEU_REF && supabase db push`.
 3. **Authentication → Sign In / Providers → Email**: desative "Allow new users to sign up". Só vocês dois terão conta.
@@ -63,19 +64,22 @@ Stack: React 19, TypeScript, Vite, Tailwind 4 e Supabase (PostgreSQL, Auth e RLS
 ## Como funciona
 
 ### Convidado
-Boas-vindas (cópia fiel do convite) → nome → "Podemos contar com você?" → fralda (obrigatória só para quem confirma) → mensagem final, resumo, "Adicionar à agenda" e 3 sugestões de mimo.
+Boas-vindas (cópia fiel do convite) → nome e "Quantas pessoas vão com você?" → "Podemos contar com você?" → fralda (obrigatória só para quem confirma) → "Presença confirmada! 💕", mensagem final, resumo (responsável, cidade, data, participantes e fralda), "Adicionar à agenda" e 3 sugestões de mimo.
+
+- **Famílias e acompanhantes:** cada confirmação representa uma família. O convidado informa só os acompanhantes (0 = vai sozinho, máximo 20). Total de participantes = 1 + acompanhantes. A pergunta pode ser desligada por cidade em **Eventos**.
 
 - **Alterar a resposta:** o navegador gera um token secreto de 256 bits. O banco guarda só o hash SHA-256. O próprio aparelho lembra da resposta, e a pessoa pode copiar um link pessoal (`/guarulhos?r=…`) para alterar de outro celular. Ninguém consegue ver nem editar a resposta de outra pessoa digitando um nome.
 - **Cliques repetidos** não duplicam: cada envio tem um `client_request_id` único, e repetições devolvem o mesmo registro.
 
 ### Fraldas
-Alocação incremental determinística, separada por cidade. O tamanho recomendado é o de maior déficit `meta% × (confirmados + 1) − já escolhidos`. Com 20 confirmações nas metas padrão (5/15/35/30/15), o resultado é exatamente 1 RN, 3 P, 7 M, 6 G e 3 XG (há um teste para isso). Nenhum tamanho é bloqueado. Só confirmações "sim" contam, e quem desiste sai da conta na hora.
+Alocação incremental determinística, separada por cidade. O tamanho recomendado é o de maior déficit `meta% × (confirmados + 1) − já escolhidos`. Com 20 confirmações nas metas padrão (5/15/35/30/15), o resultado é exatamente 1 RN, 3 P, 7 M, 6 G e 3 XG (há um teste para isso). Nenhum tamanho é bloqueado. Só confirmações "sim" contam, e quem desiste sai da conta na hora. **A fralda é por família:** cada confirmação conta uma escolha de tamanho, independentemente do número de acompanhantes. Mudar os acompanhantes não altera a distribuição.
 
 ### Sugestões de presentes
-Calculadas no banco a cada acesso:
+Sorteadas no banco a cada visita ao convite (nada é gravado nem reservado por aparecer):
 1. Itens ativos, elegíveis, não descartados e com quantidade pendente.
 2. As fixações manuais válidas entram primeiro.
-3. Cada posição recebe o melhor item da sua faixa (barato ≤ R$ 40 < médio ≤ R$ 100 < caro), considerando o **preço unitário**. A ordem é por prioridade, depois proporção pendente, e evita itens parecidos (mesma palavra inicial ou mesmo grupo).
+3. Cada posição recebe um item **sorteado** da sua faixa (barato ≤ R$ 40 < médio ≤ R$ 100 < caro), considerando o **preço unitário**. O sorteio é ponderado pela prioridade (alta 4× · média 2× · baixa 1×) e evita itens parecidos (mesma palavra inicial ou mesmo grupo).
+   As sugestões ficam estáveis enquanto a página está aberta e mudam ao atualizar. Se o sorteio repetir exatamente a combinação da visita anterior, o site sorteia de novo (até 3 vezes).
 4. Se a faixa estiver vazia, usa a faixa vizinha, depois itens ainda sem preço (configurável) e, por último, a faixa oposta. Nunca inventa itens: se houver menos candidatos, mostra menos.
 
 O painel mostra o motivo de cada escolha e permite **Fixar**, **Substituir** e **Excluir das sugestões**.
@@ -105,7 +109,7 @@ npm run dev
 
 ```bash
 npm test          # importação da planilha real (vitest)
-npm run test:db   # 26 cenários no PostgreSQL (requer Postgres 15+ local)
+npm run test:db   # 33 cenários no PostgreSQL (requer Postgres 15+ local)
 ```
 
 `npm run test:db` usa `tests/db/reset-local.sh`, que cria o banco `bonnie_test` com um stub mínimo do Supabase (papéis `anon`/`authenticated`, `auth.uid()`) e aplica as migrações. Ajuste `PGHOST`/`PGPORT` se necessário (padrão: socket `/tmp`, porta 54329).
@@ -137,5 +141,5 @@ Também foi feito um teste ponta a ponta no navegador (celular 390 px) com Postg
 - **Fora das sugestões por padrão:** fraldas (já vêm pela confirmação), remédios (aba Saúde), itens pessoais da mamãe e da mala, documentos e tinta. É só ativar no item.
 - **Prioridade:** começa "Média" para todos, e "Baixa" para o que a planilha marca como opcional, "talvez" ou uso futuro.
 - **Preço de referência:** o "Preço p/comparação" vira preço estimado. O "Valor (R$)" vira valor pago na compra importada.
-- **Acompanhantes:** o banco já tem `party_size` e `allow_companions`, mas está desligado. O fluxo é uma confirmação por pessoa.
+- **Acompanhantes:** `rsvps.companions_count` (migração `20261118000100`, que substituiu o `party_size` nunca usado). Confirmações anteriores ficam com 0 acompanhantes.
 - **Prévia do WhatsApp:** os textos das imagens de compartilhamento são fixos no build. Se mudar data ou horário, rode `scripts/generate-assets.py` e publique de novo. O convite em si atualiza sozinho.

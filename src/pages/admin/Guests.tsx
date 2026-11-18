@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { friendlyError } from '../../lib/errors'
 import { dateTime } from '../../lib/format'
-import { DIAPER_SIZES } from '../../lib/types'
-import { Button } from '../../components/ui'
+import { DIAPER_SIZES, MAX_COMPANIONS } from '../../lib/types'
+import { partySize, peopleLabel, rsvpTotals } from '../../lib/rsvpStats'
+import { Button, NumberStepper } from '../../components/ui'
 import {
   ATTENDANCE_LABEL, Badge, ErrorBox, Field, Loading, Modal, Panel, RSVP_COLS, Toast, downloadCsv, fetchEvents, fetchRsvps, inputCls, useLoad,
   type RsvpRow,
@@ -36,6 +37,8 @@ export default function Guests() {
     )
   }, [data, q, city, att, onlyDup, dupKeys])
 
+  const tot = useMemo(() => rsvpTotals(rows), [rows])
+
   if (loading && !data) return <Loading />
   if (error) return <ErrorBox>{error}</ErrorBox>
   if (!data) return null
@@ -43,8 +46,17 @@ export default function Guests() {
 
   const exportCsv = () =>
     downloadCsv(`convidados-bonnie-${new Date().toISOString().slice(0, 10)}.csv`, [
-      ['Nome', 'Cidade', 'Resposta', 'Fralda', 'Respondido em', 'Atualizado em'],
-      ...rows.map((r) => [r.guest_name, cityOf(r.event_id), ATTENDANCE_LABEL[r.attendance], r.diaper_size ?? '', dateTime(r.created_at), dateTime(r.updated_at)]),
+      ['Responsável', 'Cidade', 'Resposta', 'Acompanhantes', 'Total de participantes', 'Fralda', 'Respondido em', 'Atualizado em'],
+      ...rows.map((r) => [
+        r.guest_name,
+        cityOf(r.event_id),
+        ATTENDANCE_LABEL[r.attendance],
+        r.companions_count,
+        partySize(r),
+        r.diaper_size ?? '',
+        dateTime(r.created_at),
+        dateTime(r.updated_at),
+      ]),
     ])
 
   const remove = async (r: RsvpRow) => {
@@ -87,13 +99,23 @@ export default function Guests() {
         </label>
       </div>
 
+      <p className="mb-3 rounded-2xl bg-soft px-4 py-3 text-sm" aria-live="polite">
+        {city || att || q || onlyDup ? 'No filtro atual: ' : 'Total: '}
+        <strong className="font-medium">{tot.families}</strong> {tot.families === 1 ? 'família confirmada' : 'famílias confirmadas'} ·{' '}
+        <strong className="font-medium">{peopleLabel(tot.people)}</strong> ({tot.companions} acompanhantes) ·{' '}
+        <strong className="font-medium">{tot.diaperChoices}</strong> {tot.diaperChoices === 1 ? 'fralda' : 'fraldas'} · {tot.maybeFamilies} indecisas ·{' '}
+        {tot.declinedFamilies} ausentes
+      </p>
+
       <div className="-mx-4 overflow-x-auto px-4">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[880px] text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-ink/65">
             <tr>
-              <th className="py-2 pr-3 font-normal">Nome</th>
+              <th className="py-2 pr-3 font-normal">Responsável</th>
               <th className="py-2 pr-3 font-normal">Cidade</th>
               <th className="py-2 pr-3 font-normal">Resposta</th>
+              <th className="py-2 pr-3 text-right font-normal">Acompanhantes</th>
+              <th className="py-2 pr-3 text-right font-normal">Total</th>
               <th className="py-2 pr-3 font-normal">Fralda</th>
               <th className="py-2 pr-3 font-normal">Respondido</th>
               <th className="py-2 pr-3 font-normal">Atualizado</th>
@@ -115,6 +137,10 @@ export default function Guests() {
                 <td className="py-2.5 pr-3">
                   <Badge tone={r.attendance === 'yes' ? 'good' : r.attendance === 'maybe' ? 'warn' : 'muted'}>{ATTENDANCE_LABEL[r.attendance]}</Badge>
                 </td>
+                <td className="py-2.5 pr-3 text-right tabular-nums">{r.companions_count}</td>
+                <td className={`py-2.5 pr-3 text-right tabular-nums ${r.attendance === 'yes' ? 'font-medium' : 'text-ink/55'}`} title={r.attendance === 'yes' ? undefined : 'Não entra na contagem de pessoas confirmadas'}>
+                  {partySize(r)}
+                </td>
                 <td className="py-2.5 pr-3">{r.diaper_size ?? '—'}</td>
                 <td className="py-2.5 pr-3 tabular-nums">{dateTime(r.created_at)}</td>
                 <td className="py-2.5 pr-3 tabular-nums">{dateTime(r.updated_at)}</td>
@@ -130,7 +156,7 @@ export default function Guests() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-ink/60">
+                <td colSpan={9} className="py-8 text-center text-ink/60">
                   Nenhuma resposta encontrada.
                 </td>
               </tr>
@@ -173,6 +199,7 @@ function EditRsvp({ row, events, onClose, onSaved }: { row: RsvpRow | null; even
         event_id: form.event_id,
         attendance: form.attendance,
         diaper_size: form.attendance === 'yes' ? form.diaper_size : null,
+        companions_count: form.companions_count,
       })
       .eq('id', form.id)
       .select(RSVP_COLS)
@@ -205,8 +232,24 @@ function EditRsvp({ row, events, onClose, onSaved }: { row: RsvpRow | null; even
               ))}
             </select>
           </Field>
+          <div>
+            <span id="edit-companions" className="mb-1 block text-sm font-normal text-ink/80">
+              Acompanhantes
+            </span>
+            <div className="flex flex-wrap items-center gap-4">
+              <NumberStepper
+                value={form.companions_count}
+                onChange={(v) => setForm({ ...form, companions_count: v })}
+                min={0}
+                max={MAX_COMPANIONS}
+                label="Acompanhantes"
+                labelId="edit-companions"
+              />
+              <span className="text-sm text-ink/70">{peopleLabel(partySize(form))} no total</span>
+            </div>
+          </div>
           {form.attendance === 'yes' && (
-            <Field label="Fralda">
+            <Field label="Fralda" hint="Uma escolha por família, independentemente do número de pessoas.">
               <select className={inputCls} value={form.diaper_size ?? ''} onChange={(e) => setForm({ ...form, diaper_size: (e.target.value || null) as RsvpRow['diaper_size'] })}>
                 <option value="">Escolha…</option>
                 {DIAPER_SIZES.map((s) => (

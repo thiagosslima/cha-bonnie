@@ -37,18 +37,19 @@ export default function Diapers() {
     <div className="grid gap-5">
       <Panel title="Consolidado (as duas cidades)">
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-          <Stat label="Total" value={grand} hint="escolhas de confirmados" />
+          <Stat label="Total" value={grand} hint="1 por família confirmada" />
           {all.map((a) => (
             <Stat key={a.size} label={a.size} value={a.chosen} hint={grand ? `${Math.round((a.chosen / grand) * 1000) / 10}%` : '—'} />
           ))}
         </div>
         <p className="mt-3 text-xs text-ink/65">
-          Cada confirmação conta como uma escolha de tamanho (não como número de pacotes). Só respostas “Confirmado” entram na conta.
+          A fralda é por família: cada confirmação conta como uma escolha de tamanho, seja qual for o número de acompanhantes (e não como número de
+          pacotes). Só respostas “Confirmado” entram na conta, e a distribuição considera apenas as famílias confirmadas.
         </p>
       </Panel>
       <div className="grid gap-5 lg:grid-cols-2">
         {data.map((e) => (
-          <Panel key={e.event_id} title={`${e.city} · ${total(e)} escolhas`}>
+          <Panel key={e.event_id} title={`${e.city} · ${total(e)} ${total(e) === 1 ? 'família' : 'famílias'}`}>
             <TargetBars
               color={e.theme_primary}
               rows={e.sizes.map((s) => ({ label: s.diaper_size, value: s.chosen, pct: Number(s.current_percentage), target: Number(s.target_percentage), highlight: s.is_recommended }))}
